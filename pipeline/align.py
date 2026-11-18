@@ -222,12 +222,14 @@ def main():
     log(f"عدد آيات المرجع: {len(ayahs)}")
 
     import stable_whisper
+    from common import load_audio_ffmpeg
     model = stable_whisper.load_faster_whisper(
         args.model, device=args.device, compute_type=args.compute_type)
     full_text = ' '.join(a['text'] for a in ayahs)
     log("استخراج الألفاظ المنطوقة بتوقيتاتها (transcribe word_timestamps)...")
     # المسار الموجه: تفريغ حر بكلمات موقوتة ثم ربطه بالمرجع عبر DP (درس المحاذاة الديناميكية)
-    result = model.transcribe(audio, language='ar', word_timestamps=True)
+    audio_np = load_audio_ffmpeg(audio)
+    result = model.transcribe(audio_np, language='ar', word_timestamps=True)
     words = extract_words(result)
     if not words:
         log("التفريغ الحر بلا كلمات — محاولة stable-ts align")

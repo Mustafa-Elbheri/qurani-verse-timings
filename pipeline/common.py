@@ -44,6 +44,16 @@ def ffmpeg_slice(path, start_ms, end_ms, dest):
         raise RuntimeError('ffmpeg failed: ' + r.stderr[-300:])
     return dest
 
+def load_audio_ffmpeg(path, sr=16000):
+    """تحميل الصوت كمصفوفة float32 بـ16kHz عبر ffmpeg — تجاوز كامل لمشكلة توافق PyAV."""
+    import numpy as np
+    r = subprocess.run(
+        ['ffmpeg', '-v', 'error', '-i', path, '-f', 'f32le', '-ac', '1',
+         '-ar', str(sr), 'pipe:1'], capture_output=True, timeout=1800)
+    if r.returncode != 0:
+        raise RuntimeError('ffmpeg decode failed: ' + (r.stderr or b'')[-300:].decode('utf-8', 'replace'))
+    return np.frombuffer(r.stdout, dtype=np.float32).copy()
+
 def write_json(path, data):
     tmp = path + '.tmp'
     with open(tmp, 'w', encoding='utf-8') as f:
