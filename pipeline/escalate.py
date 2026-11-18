@@ -34,7 +34,9 @@ def load_model_large(device, compute_type):
 
 def free_transcript(model, clip_path):
     """تفريغ حر مستقل: دون مرجع، بالعربية، beam_size=1 وtemperature=0."""
-    r = model.transcribe(clip_path, language='ar', word_timestamps=True,
+    from common import load_audio_ffmpeg
+    audio_np = load_audio_ffmpeg(clip_path)
+    r = model.transcribe(audio_np, language='ar', word_timestamps=True,
                          beam_size=1, temperature=0, initial_prompt=None)
     texts = []
     for seg in (getattr(r, 'segments', None) or []):
@@ -166,8 +168,8 @@ def run_ctc(args, pending, proposal, review, resolved_nums):
     ctc = Wav2Vec2ForCTC.from_pretrained('jonatasgrosman/wav2vec2-large-xlsr-53-arabic')
     ctc.eval()
     ref = QuranReference()
-    ayah_by_num = {v['num']: v for v in
-                   ref.track_ayahs(proposal['unit_kind'], proposal['unit_number'])}
+    ayahs = ref.track_ayahs(proposal['unit_kind'], proposal['unit_number'])
+    ayah_by_num = {i + 1: a for i, a in enumerate(ayahs)}
     for case in remaining:
         num = case['num']
         clip = os.path.join(args.out, f'window-{num:04d}.wav')
