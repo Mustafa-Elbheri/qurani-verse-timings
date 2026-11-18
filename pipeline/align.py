@@ -225,13 +225,13 @@ def main():
     model = stable_whisper.load_faster_whisper(
         args.model, device=args.device, compute_type=args.compute_type)
     full_text = ' '.join(a['text'] for a in ayahs)
-    log("المحاذاة بـ stable-ts...")
-    result = model.align(audio, full_text, language='ar')
+    log("استخراج الألفاظ المنطوقة بتوقيتاتها (transcribe word_timestamps)...")
+    # المسار الموجه: تفريغ حر بكلمات موقوتة ثم ربطه بالمرجع عبر DP (درس المحاذاة الديناميكية)
+    result = model.transcribe(audio, language='ar', word_timestamps=True)
     words = extract_words(result)
     if not words:
-        log("لم تنتج المحاذاة كلمات — تحويل للتفريغ الحر word_timestamps")
-        result = model.transcribe(audio, language='ar', word_timestamps=True,
-                                  beam_size=1, temperature=0)
+        log("التفريغ الحر بلا كلمات — محاولة stable-ts align")
+        result = model.align(audio, full_text, language='ar')
         words = extract_words(result)
     if not words:
         raise RuntimeError('لا كلمات في الناتج — عطل بيئة')
@@ -254,7 +254,8 @@ def main():
               'resolved_cases': [], 'pending_cases': suspects}
     write_json(os.path.join(args.out, 'timings.proposed.json'), proposal)
     write_json(os.path.join(args.out, 'review.json'), review)
-    log("حفظ timings.proposed.json و review.json")
+    write_json(os.path.join(args.out, 'words.json'), {'words': words})
+    log("حفظ timings.proposed.json و review.json و words.json")
     return 0  # خروج ناجح دائمًا عند إنتاج مخرجات؛ الاشتباهات لا تعني عطلًا
 
 
