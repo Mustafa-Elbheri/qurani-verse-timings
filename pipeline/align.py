@@ -183,7 +183,9 @@ def clamp_ayahs(ayahs, matches, words, duration_ms):
             continue
         reasons = []
         if raw_start <= EDGE_MARGIN_MS:
-            reasons.append('start_at_audio_edge')
+            # البدء المباشر عند بداية الملف طبيعي في المصاحف المقسّمة — يُسجل كملاحظة لا كمانع
+            if m.get('missing', 0) > 0:
+                reasons.append('start_at_audio_edge')
         if duration_ms - raw_end <= EDGE_MARGIN_MS:
             reasons.append('end_at_audio_edge')
         if missing_ratio > 0.5:

@@ -60,7 +60,7 @@ def main():
             approved = False
             pending_total.extend([{**c, 'track': entry} for c in pending] or
                                  [{'track': entry, 'reason': 'empty_verses'}])
-        tracks[prop['url'].rsplit('/', 1)[-1]] = {
+        tracks[prop['track_url'].rsplit('/', 1)[-1]] = {
             'url': prop['track_url'],
             'sha256': prop['source_sha256'],
             'duration_ms': prop['duration_ms'],

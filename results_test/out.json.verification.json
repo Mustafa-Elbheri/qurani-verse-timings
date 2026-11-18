@@ -1,0 +1,15 @@
+{
+ "structural_checks": "FAIL",
+ "tracks": 1,
+ "errors": [],
+ "pending_cases": [
+  {
+   "num": 1,
+   "reason": "start_at_audio_edge",
+   "start_ms": 190,
+   "end_ms": 3590,
+   "track": "track-30"
+  }
+ ],
+ "first_and_last_checked_all_tracks": false
+}
