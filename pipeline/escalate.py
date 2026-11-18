@@ -56,9 +56,14 @@ def main():
     ap.add_argument('--device', default='cpu')
     ap.add_argument('--compute-type', default='int8')
     ap.add_argument('--with-ctc', action='store_true')
+    ap.add_argument('--fulltrack', action='store_true',
+                    help='تفريغ حر كامل للجزء بكلمات موقوتة (مرحلة إصلاح الحالات المعلقة)')
     args = ap.parse_args()
 
     os.makedirs(args.out, exist_ok=True)
+    if args.fulltrack:
+        return fulltrack_pass(args)
+
     proposal = json.load(open(args.proposal, encoding='utf-8'))
     review = json.load(open(args.review, encoding='utf-8'))
     duration_ms = proposal['duration_ms']
@@ -149,6 +154,33 @@ def main():
     write_json(os.path.join(args.out, 'independent-transcript.json'), {'evidence': evidence})
     write_json(args.review, review)
     log(f"حُسمت: {len(resolved_nums)} | معلقة: {len(review['pending_cases'])}")
+    return 0
+
+
+def fulltrack_pass(args):
+    """تفريغان حران كاملان للجزء بكلمات موقوتة — دليل تموضع لما بقي معلقًا."""
+    from common import load_audio_ffmpeg
+    model = load_model_large(args.device, args.compute_type)
+    audio_np = load_audio_ffmpeg(args.audio)
+    passes = []
+    texts = []
+    for run in (1, 2):
+        r = model.transcribe(audio_np, language='ar', word_timestamps=True,
+                             beam_size=1, temperature=0, initial_prompt=None)
+        ws = []
+        for seg in (getattr(r, 'segments', None) or []):
+            for w in (getattr(seg, 'words', None) or []):
+                word = getattr(w, 'word', '') or ''
+                if not word.strip():
+                    continue
+                ws.append({'text': word, 'start': getattr(w, 'start', 0.0),
+                           'end': getattr(w, 'end', 0.0)})
+        passes.append(ws)
+        texts.append(' '.join(w['text'].strip() for w in ws))
+        log(f'تفريغ كامل {run}: {len(ws)} كلمة')
+    write_json(os.path.join(args.out, 'fulltrack-transcript.json'), {
+        'transcript_1': texts[0], 'transcript_2': texts[1],
+        'transcript_1_words': passes[0], 'transcript_2_words': passes[1]})
     return 0
 
 
