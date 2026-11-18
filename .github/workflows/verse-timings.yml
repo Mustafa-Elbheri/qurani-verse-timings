@@ -122,20 +122,10 @@ jobs:
           pattern: track-*
       - name: Merge + structural audit
         id: export
-        run: |
-          python - <<'PY'
-import json, os, subprocess, sys
-summary = json.loads(os.environ['SUMMARY_JSON'])
-safe = ''.join(c if c.isalnum() else '-' for c in summary['reciter']).strip('-')
-out = f"timings/{safe}.json"
-cmd = [sys.executable, 'pipeline/export.py', '--results', 'results',
-       '--reciter', summary['reciter'], '--unit-kind', summary['kind'],
-       '--unit-name', summary['unit'], '--server', summary['server'], '--out', out]
-r = subprocess.run(cmd)
-sys.exit(r.returncode)
-PY
+        run: python pipeline/merge_and_export.py
         env:
           SUMMARY_JSON: ${{ needs.prepare.outputs.summary }}
+          RESULTS_DIR: results
       - name: Upload timings artifact
         if: always()
         uses: actions/upload-artifact@v4
