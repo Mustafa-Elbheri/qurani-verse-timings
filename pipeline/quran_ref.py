@@ -49,7 +49,7 @@ class QuranReference:
             raise ValueError('unit_kind must be juz or surah')
         out = []
         for k in keys:
-            text = self.by_key[(k['surah'], k['ayah'])]
+            text = self.by_key[(k['surah'], k['ayah'])].strip()
             out.append({'surah': k['surah'], 'ayah': k['ayah'], 'text': text,
                         'norm': normalize(text)})
         return out

@@ -67,6 +67,13 @@ def main():
     if not pending:
         log('لا حالات مشتبهة مطلوبة — لا شيء يُصعّد.')
         return 0
+    if len(pending) > 40:
+        # فشل شامل في المحاذاة وليس حالات فردية — لا تصعيد عشوائي
+        log(f'اشتباهات كثيرة جدًا ({len(pending)}) — فشل شامل؛ تُرفض الآلة ولا تُصعّد.')
+        review['pending_cases'].extend(
+            {'num': c['num'], 'reason': 'wholesale_failure:' + c['reason']} for c in pending)
+        write_json(args.review, review)
+        return 2
 
     ref = QuranReference()
     ayah_by_num = {}
@@ -86,46 +93,50 @@ def main():
     resolved_nums = set()
     for case in pending:
         num = case['num']
-        ayah = ayah_by_num.get(num)
-        if ayah is None:
-            continue
-        # نافذة: من نهاية الآية السابقة المطابقة (أو بداية الصوت) إلى بداية التالية (أو النهاية)
-        prev_end = 0
-        next_start = duration_ms
-        for v in proposal['verses']:
-            if v['num'] < num and v['end_ms'] > prev_end:
-                prev_end = v['end_ms']
-            if v['num'] > num and v['start_ms'] < next_start:
-                next_start = v['start_ms']
-        start = max(0, prev_end - PADDING_MS)
-        end = min(duration_ms, next_start + PADDING_MS)
-        if end - start > 120000:  # سقف النافذة 120 ثانية
-            end = start + 120000
-        clip = os.path.join(args.out, f'window-{num:04d}.wav')
-        ffmpeg_slice(args.audio, start, end, clip)
+        try:
+            ayah = ayah_by_num.get(num)
+            if ayah is None:
+                continue
+            # نافذة: من نهاية الآية السابقة المطابقة (أو بداية الصوت) إلى بداية التالية (أو النهاية)
+            prev_end = 0
+            next_start = duration_ms
+            for v in proposal['verses']:
+                if v['num'] < num and v['end_ms'] > prev_end:
+                    prev_end = v['end_ms']
+                if v['num'] > num and v['start_ms'] < next_start:
+                    next_start = v['start_ms']
+            start = max(0, prev_end - PADDING_MS)
+            end = min(duration_ms, next_start + PADDING_MS)
+            if end - start > 120000:  # سقف النافذة 120 ثانية
+                end = start + 120000
+            clip = os.path.join(args.out, f'window-{num:04d}.wav')
+            ffmpeg_slice(args.audio, start, end, clip)
 
-        t1 = free_transcript(model, clip)
-        t2 = free_transcript(model, clip)
-        sim1, sim2 = fuzzy_ratio(t1, ayah['text']), fuzzy_ratio(t2, ayah['text'])
-        ev = {'num': num, 'window_start_ms': start, 'window_end_ms': end,
-              'transcript_1': t1, 'transcript_2': t2,
-              'similarity_1': round(sim1, 3), 'similarity_2': round(sim2, 3),
-              'clip_sha256': None, 'ctc': None}
-        evidence.append(ev)
-        if sim1 >= SIMILARITY_RESOLVE and sim2 >= SIMILARITY_RESOLVE:
-            # تأييد الهوية: الآية منطوقة هنا؛ تبقى الحدود من المحاذاة أو تبقى معلقة إن لم توجد حدود
-            resolved_nums.add(num)
-            review['resolved_cases'].append({
-                'num': num,
-                'reason': f'large-v3 free transcripts match ayah body (sim={sim1:.2f}/{sim2:.2f})',
-                'evidence_files': [os.path.abspath(os.path.join(args.out, f'window-{num:04d}.wav'))],
-            })
-            if not any(v['num'] == num for v in proposal['verses']):
-                # الآية لم تُطابق أصلًا — لا نختلق زمنًا؛ نطلب حسم الحدود بمحاذاة نطاق متصل لاحقًا
-                review['pending_cases'].append({'num': num,
-                                                'reason': 'identity_confirmed_but_bounds_unresolved',
-                                                'needs_joint_window': True})
-                resolved_nums.discard(num)
+            t1 = free_transcript(model, clip)
+            t2 = free_transcript(model, clip)
+            sim1, sim2 = fuzzy_ratio(t1, ayah['text']), fuzzy_ratio(t2, ayah['text'])
+            ev = {'num': num, 'window_start_ms': start, 'window_end_ms': end,
+                  'transcript_1': t1, 'transcript_2': t2,
+                  'similarity_1': round(sim1, 3), 'similarity_2': round(sim2, 3),
+                  'clip_sha256': None, 'ctc': None}
+            evidence.append(ev)
+            if sim1 >= SIMILARITY_RESOLVE and sim2 >= SIMILARITY_RESOLVE:
+                # تأييد الهوية: الآية منطوقة هنا؛ تبقى الحدود من المحاذاة أو تبقى معلقة إن لم توجد حدود
+                resolved_nums.add(num)
+                review['resolved_cases'].append({
+                    'num': num,
+                    'reason': f'large-v3 free transcripts match ayah body (sim={sim1:.2f}/{sim2:.2f})',
+                    'evidence_files': [os.path.abspath(os.path.join(args.out, f'window-{num:04d}.wav'))],
+                })
+                if not any(v['num'] == num for v in proposal['verses']):
+                    # الآية لم تُطابق أصلًا — لا نختلق زمنًا؛ نطلب حسم الحدود بمحاذاة نطاق متصل لاحقًا
+                    review['pending_cases'].append({'num': num,
+                                                    'reason': 'identity_confirmed_but_bounds_unresolved',
+                                                    'needs_joint_window': True})
+                    resolved_nums.discard(num)
+        except Exception as ex:
+            log(f'تعذّر حسم الآية {num}: {ex}')
+            continue
 
     if args.with_ctc:
         run_ctc(args, pending, proposal, review, resolved_nums)
@@ -134,7 +145,7 @@ def main():
     review['pending_cases'] = [c for c in review['pending_cases']
                                if c.get('num') not in resolved_nums]
     write_json(os.path.join(args.out, 'independent-transcript.json'), {'evidence': evidence})
-    write_json(args.review if os.path.isabs(args.review) else args.review, review)
+    write_json(args.review, review)
     log(f"حُسمت: {len(resolved_nums)} | معلقة: {len(review['pending_cases'])}")
     return 0
 

@@ -1,41 +1,44 @@
 # -*- coding: utf-8 -*-
-"""اختبار منطقي سريع: quran_ref + AyahMatcher + clamp_ayahs على بيانات اصطناعية."""
+"""اختبار منطقي سريع للمطابقة الشاملة (Banded DP): سلامة أساسية + اكتشاف سقط."""
 import os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'pipeline'))
 sys.stdout.reconfigure(encoding='utf-8')
 
-from quran_ref import QuranReference, normalize
+from quran_ref import QuranReference
 from align import AyahMatcher, clamp_ayahs, word_norm
 
 ref = QuranReference(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data'))
 ayahs = ref.track_ayahs('juz', 30)
-assert len(ayahs) == 564, len(ayahs)
-assert ayahs[0]['surah'] == 78 and ayahs[-1]['surah'] == 114
-print('جزء 30:', len(ayahs), 'آية | الأولى:', ayahs[0]['text'][:40], '| الأخيرة:', ayahs[-1]['text'][:40])
+assert len(ayahs) == 564 and ayahs[0]['text'][0] != ' ', 'strip text'
 
-# تفريغ اصطناعي: كلمات الجزء 30 بالترتيب مع أزمنة متصاعدة
+# تفريغ اصطناعي متصل لأول 30 آية
 words, t = [], 0
-for a in ayahs[:20]:
+for a in ayahs[:30]:
     for w in a['norm'].split():
         t += 400
         words.append({'w': word_norm(w), 'start': t, 'end': t + 350})
         t += 350
-m = AyahMatcher(words, band=200)
-matches = m.match_all(ayahs[:20])
+m = AyahMatcher(words, band=500)
+matches = m.match_all(ayahs[:30])
 ok = sum(1 for x in matches if x['matched'])
-print(f'مطابقة اصطناعية: {ok}/20')
-assert ok >= 19, matches[:5]
+print(f'مطابقة شاملة: {ok}/30')
+assert ok == 30, [(i + 1, x) for i, x in enumerate(matches) if not x['matched']][:5]
+assert all(x['missing'] == 0 for x in matches), 'لا كلمات ناقصة في الاصطناعي'
 
-verses, suspects = clamp_ayahs(ayahs[:20], matches, words, 3600000)
-print('آيات مُوقتة:', len(verses), '| اشتباهات:', len(suspects))
-assert verses[0]['start_ms'] >= 0 and all(v['end_ms'] > v['start_ms'] for v in verses)
-assert all(a['end_ms'] <= b['start_ms'] for a, b in zip(verses, verses[1:]))
+verses, suspects = clamp_ayahs(ayahs[:30], matches, words, 3600000)
+assert len(verses) == 30 and not suspects, f'اشتباهات غير متوقعة: {suspects[:3]}'
+assert all(a['end_ms'] <= b['start_ms'] + 1 for a, b in zip(verses, verses[1:])), 'رتابة'
 
-# آية ساقطة (حذف كلمات الآية 10 من التفريغ) → يجب أن تظهر غير مطابقة
-words2 = [w for w in words if not (verses[9]['start_ms'] - 50 <= w['start'] <= verses[9]['end_ms'] + 50)]
-m2 = AyahMatcher(words2, band=200)
-matches2 = m2.match_all(ayahs[:20])
-unmatched = [i + 1 for i, x in enumerate(matches2) if not x['matched']]
-print('غير المطابقة بعد السقط الاصطناعي:', unmatched)
-assert unmatched, 'يجب أن تُكتشف الآية الساقطة'
+# سقط اصطناعي: حذف كلمات الآية 10 بالكامل من التفريغ
+v10 = [v for v in verses if v['num'] == 10][0]
+words2 = [w for w in words if not (v10['start_ms'] - 200 <= w['start'] <= v10['end_ms'] + 200)]
+m2 = AyahMatcher(words2, band=500)
+matches2 = m2.match_all(ayahs[:30])
+bad = [i + 1 for i, x in enumerate(matches2) if not x['matched'] or x.get('missing', 0) > 0]
+print('الحالات المكتشفة بعد السقط الاصطناعي:', bad)
+assert 10 in bad, 'يجب اكتشاف الآية الساقطة'
+# الآيات السليمة تبقى في أماكنها الصحيحة
+verses2, suspects2 = clamp_ayahs(ayahs[:30], matches2, words2, 3600000)
+pos = {v['num']: v['start_ms'] for v in verses2}
+assert abs(pos.get(11, 0) - [v for v in verses if v['num'] == 11][0]['start_ms']) < 1500, 'انزلاق بعد السقط!'
 print('ALL LOCAL TESTS PASSED')

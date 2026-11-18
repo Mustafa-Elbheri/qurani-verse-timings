@@ -71,7 +71,6 @@ jobs:
       - name: Warm up Small model
         run: python -c "from faster_whisper import WhisperModel; WhisperModel('small', device='cpu', compute_type='int8')"
       - name: Align track ${{ matrix.track.number }} (Small)
-        id: align
         run: |
           python pipeline/align.py \
             --track-url "${{ matrix.track.url }}" \
@@ -79,16 +78,12 @@ jobs:
             --unit-number ${{ matrix.track.number }} \
             --out "results/track-${{ matrix.track.number }}" \
             --model small --device cpu --compute-type int8
-        continue-on-error: true
       - name: Install CTC deps (عند وجود حالات)
-        if: steps.align.outcome == 'success'
         run: |
           if python -c "import json,sys; r=json.load(open('results/track-${{ matrix.track.number }}/review.json',encoding='utf-8')); sys.exit(0 if r['suspects'] else 1)"; then
             pip install -r pipeline/requirements-ctc.txt
           fi
-        continue-on-error: true
       - name: Escalate suspects (Large-v3 + عربي)
-        if: steps.align.outcome == 'success'
         run: |
           AUDIO=$(ls results/track-${{ matrix.track.number }}/audio.* | head -1)
           python pipeline/escalate.py \
@@ -97,7 +92,6 @@ jobs:
             --review "results/track-${{ matrix.track.number }}/review.json" \
             --out "results/track-${{ matrix.track.number }}/escalation" \
             --device cpu --compute-type int8 --with-ctc
-        continue-on-error: true
       - name: Upload track artifact
         if: always()
         uses: actions/upload-artifact@v4
