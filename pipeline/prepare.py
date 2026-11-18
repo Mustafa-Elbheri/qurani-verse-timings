@@ -18,6 +18,24 @@ def parse_range(spec, maximum):
     return sorted(n for n in nums if 1 <= n <= maximum)
 
 def main():
+    custom_server = os.environ.get('INPUT_SERVER_URL', '').strip()
+    if custom_server:
+        # وضع مخصص: سيرفر صريح + أجزاء مرقمة 01..30 (لتوقيت مصدر غير موجود في الكتالوج)
+        tracks_spec = os.environ.get('INPUT_TRACKS', '1-30')
+        maximum = int(os.environ.get('INPUT_MAX_TRACKS', '30'))
+        selected = parse_range(tracks_spec, maximum)
+        pattern = os.environ.get('INPUT_FILE_PATTERN', '{:02d}.mp3')
+        from urllib.parse import quote
+        matrix = [{'number': n, 'name': f'جزء {n}',
+                   'url': custom_server.rstrip('/') + '/' + quote(pattern.format(n))}
+                  for n in selected]
+        summary = {'reciter': os.environ.get('INPUT_RECITER_NAME', 'مصحف مخصص'),
+                   'unit': 'جزء', 'kind': 'juz', 'server': custom_server, 'selected': selected}
+        with open(os.environ.get('GITHUB_OUTPUT', '/dev/null'), 'a', encoding='utf-8') as f:
+            f.write(f'matrix={json.dumps(matrix, ensure_ascii=False)}\n')
+            f.write(f'summary={json.dumps(summary, ensure_ascii=False)}\n')
+        print(json.dumps(summary, ensure_ascii=False))
+        return
     reciter_index = int(os.environ.get('INPUT_RECITER_INDEX', '6'))
     tracks_spec = os.environ.get('INPUT_TRACKS', '1-30')
     repo = os.environ.get('GITHUB_WORKSPACE', os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
