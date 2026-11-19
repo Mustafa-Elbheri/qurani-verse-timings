@@ -49,32 +49,28 @@ class AyahMatcher:
         if R == 0 or W == 0:
             return [{'matched': False, 'avg': 0.0, 'first': 0, 'last': -1} for _ in ayahs]
         scale = W / R
+        # مصفوفة التشابه كاملة على مستوى C (سريعة جدًا) ثم DP نطاقي فوقها
+        from rapidfuzz import fuzz as _rfuzz
+        import numpy as np
+        sims = _rfuzz.cdist(ref_words, self.norms, scorer=_rfuzz.ratio,
+                            dtype=np.float32, score_cutoff=25) / np.float32(100.0)
         NEG = -1e9
         SKIP_W = 0.12   # كلمة منطوقة بلا مقابل (بسملة/استعاذة/تعليق)
         SKIP_R = 0.45   # كلمة مرجعية بلا مقابل (سقط مشتبه)
         dp = np.full((R + 1, W + 1), NEG, dtype=np.float64)
         dp[0, 0] = 0.0
-        sim_cache = {}
-        def sim(i, j):
-            key = (i, j)
-            v = sim_cache.get(key)
-            if v is None:
-                a, b = ref_words[i], self.norms[j]
-                v = fuzz.ratio(a, b) / 100.0 if abs(len(a) - len(b)) <= max(len(a), len(b), 4) else 0.0
-                if v < 0.30:
-                    v = 0.0
-                sim_cache[key] = v
-            return v
         for i in range(1, R + 1):
             jexp = i * scale
             jlo = max(1, int(jexp - self.band))
             jhi = min(W, int(jexp + self.band))
             row, prev = dp[i], dp[i - 1]
+            simrow = sims[i - 1]
             best = NEG
             for j in range(jlo, jhi + 1):
-                a = prev[j - 1] + sim(i - 1, j - 1)   # ربط
-                b = row[j - 1] - SKIP_W               # تخطي منطوقة
-                c = prev[j] - SKIP_R                  # تخطي مرجعية
+                v = simrow[j - 1]
+                a = prev[j - 1] + v                 # ربط
+                b = row[j - 1] - SKIP_W             # تخطي منطوقة
+                c = prev[j] - SKIP_R                # تخطي مرجعية
                 m = a if a >= b else b
                 if c > m:
                     m = c
@@ -82,14 +78,14 @@ class AyahMatcher:
                 if m > best:
                     best = m
             if best <= NEG / 2:
-                # انقطع القطر: وسّع النطاق مرة واحدة
                 for j in range(1, W + 1):
                     if row[j] > NEG / 2:
                         continue
-                    a = prev[j - 1] + sim(i - 1, j - 1)
-                    b = row[j - 1] - SKIP_W
-                    c = prev[j] - SKIP_R
-                    row[j] = max(a, b, c)
+                    v = simrow[j - 1]
+                    row[j] = max(prev[j - 1] + v, row[j - 1] - SKIP_W, prev[j] - SKIP_R)
+        # استرجاع المسار من (R, W)
+        def sim(i, j):
+            return float(sims[i, j]) if (0 <= i < R and 0 <= j < W) else 0.0
         # استرجاع المسار من (R, W)
         pairs = []  # (ref_index, word_index)
         i, j = R, W
