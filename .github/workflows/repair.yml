@@ -12,6 +12,21 @@ on:
         description: 'أرقام الأجزاء المطلوب إصلاحها (مثال: 15,16,20)'
         required: true
         type: string
+      server_url:
+        description: 'وضع مخصص: رابط مجلد مباشر (اتركه فارغًا للوضع العادي)'
+        required: false
+        default: ''
+        type: string
+      reciter_name:
+        description: 'اسم القارئ في الوضع المخصص'
+        required: false
+        default: 'مصحف مخصص'
+        type: string
+      file_pattern:
+        description: 'نمط اسم الملف في الوضع المخصص'
+        required: false
+        default: '{:02d}.mp3'
+        type: string
 
 permissions:
   contents: read
@@ -38,6 +53,9 @@ jobs:
         env:
           INPUT_RECITER_INDEX: ${{ inputs.reciter_index }}
           INPUT_TRACKS: ${{ inputs.tracks }}
+          INPUT_SERVER_URL: ${{ inputs.server_url }}
+          INPUT_RECITER_NAME: ${{ inputs.reciter_name }}
+          INPUT_FILE_PATTERN: ${{ inputs.file_pattern }}
         run: python pipeline/prepare.py
 
   repair:
