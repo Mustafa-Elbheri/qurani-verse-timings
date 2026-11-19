@@ -51,8 +51,9 @@ class AyahMatcher:
         scale = W / R
         # مصفوفة التشابه كاملة على مستوى C (سريعة جدًا) ثم DP نطاقي فوقها
         from rapidfuzz import fuzz as _rfuzz
+        from rapidfuzz import process as _rproc
         import numpy as np
-        sims = _rfuzz.cdist(ref_words, self.norms, scorer=_rfuzz.ratio,
+        sims = _rproc.cdist(ref_words, self.norms, scorer=_rfuzz.ratio,
                             dtype=np.float32, score_cutoff=25) / np.float32(100.0)
         NEG = -1e9
         SKIP_W = 0.12   # كلمة منطوقة بلا مقابل (بسملة/استعاذة/تعليق)
