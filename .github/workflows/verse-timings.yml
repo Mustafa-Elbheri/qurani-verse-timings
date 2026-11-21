@@ -1,156 +1,68 @@
 name: Verse Timings
-
 on:
   workflow_dispatch:
     inputs:
       reciter_index:
-        description: 'رقم القارئ في sources/review_moshafs.json (أحمد الحداد = 6)'
+        description: 'Short CPU probe reader'
         required: true
-        default: '6'
+        default: '5'
         type: string
       tracks:
-        description: 'الأرقام المطلوبة (مثال: 1-30 أو 1,2,3)'
+        description: 'Al-Fatiha only'
         required: true
-        default: '1-30'
+        default: '1'
         type: string
       publish:
-        description: 'Commit النتائج المجتازة إلى timings/'
+        description: 'Publishing disabled on verification branch'
         required: true
         default: false
         type: boolean
-      server_url:
-        description: 'وضع مخصص: رابط مجلد مباشر لملفات أجزاء غير موجودة في الكتالوج (اتركه فارغًا للوضع العادي)'
-        required: false
-        default: ''
-        type: string
-      reciter_name:
-        description: 'اسم القارئ في الوضع المخصص'
-        required: false
-        default: 'مصحف مخصص'
-        type: string
-      file_pattern:
-        description: 'نمط اسم الملف في الوضع المخصص، مثال: جزء {:02d}.mp3'
-        required: false
-        default: '{:02d}.mp3'
-        type: string
-
 permissions:
-  contents: write
-
+  contents: read
 concurrency:
-  group: verse-timings-${{ inputs.reciter_index }}
+  group: verified-hadr-cpu-probe
   cancel-in-progress: false
-
 env:
   PYTHONUTF8: '1'
-
+  CUDA_VISIBLE_DEVICES: ''
+  QURANI_CPU_THREADS: '4'
 jobs:
-  prepare:
+  verify-cpu:
     runs-on: ubuntu-latest
-    outputs:
-      matrix: ${{ steps.plan.outputs.matrix }}
-      summary: ${{ steps.plan.outputs.summary }}
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - id: plan
+          cache: pip
+      - name: Assert limited diagnostic scope
         env:
-          INPUT_RECITER_INDEX: ${{ inputs.reciter_index }}
-          INPUT_TRACKS: ${{ inputs.tracks }}
-          INPUT_SERVER_URL: ${{ inputs.server_url }}
-          INPUT_RECITER_NAME: ${{ inputs.reciter_name }}
-          INPUT_FILE_PATTERN: ${{ inputs.file_pattern }}
-        run: python pipeline/prepare.py
-
-  align:
-    needs: prepare
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      max-parallel: 5
-      matrix:
-        track: ${{ fromJson(needs.prepare.outputs.matrix) }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Cache Whisper models
-        uses: actions/cache@v4
+          REQUESTED_TRACKS: ${{ inputs.tracks }}
+          REQUESTED_PUBLISH: ${{ inputs.publish }}
+        run: |
+          test "$REQUESTED_TRACKS" = 1
+          test "$REQUESTED_PUBLISH" = false
+      - uses: actions/cache@v4
         with:
           path: ~/.cache/huggingface
-          key: whisper-models-small-v1
-      - name: Install ffmpeg
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
-      - name: Install dependencies
-        run: pip install -r pipeline/requirements.txt
-      - name: Warm up Small model
-        run: python -c "from faster_whisper import WhisperModel; WhisperModel('small', device='cpu', compute_type='int8')"
-      - name: Align track ${{ matrix.track.number }} (Small)
+          key: verified-hadr-cpu-models-v1
+      - name: Install CPU runtime
         run: |
-          python pipeline/align.py \
-            --track-url "${{ matrix.track.url }}" \
-            --unit-kind ${{ fromJson(needs.prepare.outputs.summary).kind }} \
-            --unit-number ${{ matrix.track.number }} \
-            --out "results/track-${{ matrix.track.number }}" \
-            --model small --device cpu --compute-type int8
-      - name: Install CTC deps (عند وجود حالات)
-        run: |
-          if python -c "import json,sys; r=json.load(open('results/track-${{ matrix.track.number }}/review.json',encoding='utf-8')); sys.exit(0 if r['suspects'] else 1)"; then
-            pip install -r pipeline/requirements-ctc.txt
-          fi
-      - name: Escalate suspects (Large-v3 + عربي)
-        run: |
-          AUDIO=$(ls results/track-${{ matrix.track.number }}/audio.* | head -1)
-          python pipeline/escalate.py \
-            --audio "$AUDIO" \
-            --proposal "results/track-${{ matrix.track.number }}/timings.proposed.json" \
-            --review "results/track-${{ matrix.track.number }}/review.json" \
-            --out "results/track-${{ matrix.track.number }}/escalation" \
-            --device cpu --compute-type int8 --with-ctc
-      - name: Upload track artifact
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: track-${{ matrix.track.number }}
-          path: results/track-${{ matrix.track.number }}
-          if-no-files-found: error
-
-  finalize:
-    needs: [prepare, align]
-    if: always() && needs.align.result == 'success'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Download all track artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: results
-          pattern: track-*
-      - name: Merge + structural audit
-        id: export
-        run: python pipeline/merge_and_export.py
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -r pipeline/requirements.txt transformers==4.57.3 numpy==2.4.6
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+      - name: Regression tests
+        run: python -m unittest discover -s tests -v
+      - name: Measure native CPU alignment
         env:
-          SUMMARY_JSON: ${{ needs.prepare.outputs.summary }}
-          RESULTS_DIR: results
-      - name: Upload timings artifact
+          READER_INDEX: ${{ inputs.reciter_index }}
+        run: python pipeline/ci_cpu_probe.py --reciter-index "$READER_INDEX" --track 1
+      - name: Preserve report and acoustic evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: timings-final
-          path: |
-            timings/
-            timings/*.verification.json
-      - name: Publish timings to repo
-        if: steps.export.outcome == 'success' && inputs.publish
-        run: |
-          git config user.name "qurani-timings-bot"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add timings/
-          git commit -m "توقيتات مجتازة: ${{ fromJson(needs.prepare.outputs.summary).reciter }}" || echo "لا جديد"
-          git push
+          name: cpu-probe-results
+          path: results/
+          retention-days: 14

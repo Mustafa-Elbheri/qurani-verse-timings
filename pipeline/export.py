@@ -28,6 +28,14 @@ def structural_audit(tracks, ref, unit_kind):
                 errors.append(f'{track_name} آية {v["num"]}: تراجع زمني {s} < {prev_end}')
             if e > track['duration_ms']:
                 errors.append(f'{track_name} آية {v["num"]}: end {e} يتجاوز مدة الصوت {track["duration_ms"]}')
+            if e - s < 120:
+                errors.append(f'{track_name} آية {v["num"]}: implausible_duration:{e-s}ms')
+            if v.get('suspected_boundary'):
+                errors.append(f'{track_name} آية {v["num"]}: unresolved_suspected_boundary')
+            if v.get('num') != i + 1:
+                errors.append(f'{track_name}: non_sequential_unit:{v.get("num")}')
+            if v.get('text') != ayahs[i]['text']:
+                errors.append(f'{track_name} آية {v["num"]}: reference_text_mismatch')
             if v['surah'] != ayahs[i]['surah'] or v['ayah'] != ayahs[i]['ayah']:
                 errors.append(f'{track_name} آية {v["num"]}: مفتاح غير متسلسل {v["surah"]}:{v["ayah"]}')
             prev_end = e
@@ -41,11 +49,15 @@ def main():
     ap.add_argument('--unit-name', required=True, help='اسم الوحدة في التطبيق (جزء/سورة)')
     ap.add_argument('--server', required=True)
     ap.add_argument('--out', required=True)
+    ap.add_argument('--expected-tracks', default='', help='Explicit expected recording numbers; default is the whole mushaf')
+    ap.add_argument('--allow-partial', action='store_true', help='Diagnostic checkpoint only, never ready for app integration')
     args = ap.parse_args()
 
     ref = QuranReference()
     tracks = {}
     pending_total = []
+    acoustic_errors = []
+    seen_units = set()
     approved = True
     entries = sorted(os.listdir(args.results))
     for entry in entries:
@@ -54,7 +66,19 @@ def main():
         if not os.path.isfile(prop_path):
             continue
         prop = json.load(open(prop_path, encoding='utf-8'))
-        review = json.load(open(rev_path, encoding='utf-8')) if os.path.isfile(rev_path) else {'pending_cases': []}
+        review = json.load(open(rev_path, encoding='utf-8')) if os.path.isfile(rev_path) else {}
+        from quality import audit_review
+        from verified_align import references
+        try:
+            quality_errors = audit_review(prop, review, os.path.dirname(prop_path), references(args.unit_kind, prop['unit_number']))
+        except (KeyError, TypeError, ValueError, OSError) as exc:
+            quality_errors = ['invalid_or_incomplete_evidence:' + type(exc).__name__]
+        acoustic_errors.extend(f'{entry}:{error}' for error in quality_errors)
+        if quality_errors:
+            approved = False
+        if prop['unit_number'] in seen_units:
+            acoustic_errors.append(f'{entry}:duplicate_recording_number')
+        seen_units.add(prop['unit_number'])
         pending = review.get('pending_cases', [])
         if pending or not prop.get('verses'):
             approved = False
@@ -69,13 +93,26 @@ def main():
         }
 
     errors = structural_audit(tracks, ref, args.unit_kind)
+    from prepare import parse_range
+    maximum = 30 if args.unit_kind == 'juz' else 114
+    expected = set(parse_range(args.expected_tracks, maximum)) if args.expected_tracks else set(range(1, maximum+1))
+    if not expected or seen_units != expected:
+        errors.append(f'recording_coverage_mismatch: expected={sorted(expected)}, actual={sorted(seen_units)}')
+    complete = seen_units == set(range(1, maximum+1))
+    if not complete and not args.allow_partial:
+        errors.append('partial_mushaf_not_approved_for_integration')
+    errors.extend(acoustic_errors)
     status = 'PASS' if (approved and not errors) else 'FAIL'
     verification = {
         'structural_checks': status,
         'tracks': len(tracks),
         'errors': errors,
         'pending_cases': pending_total,
-        'first_and_last_checked_all_tracks': approved,
+        'first_and_last_checked_all_tracks': approved and bool(tracks),
+        'automatic_acoustic_checks': 'PASS' if not acoustic_errors and bool(tracks) else 'FAIL',
+        'coverage_complete': complete,
+        'approved_for_integration': status == 'PASS' and complete,
+        'expected_tracks': sorted(expected),
     }
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
     write_json(args.out + '.verification.json', verification)
@@ -89,6 +126,7 @@ def main():
         'unit': args.unit_name,
         'source': args.server,
         'tracks': tracks,
+        'verification': {'approved_for_integration': status == 'PASS' and complete, 'coverage_complete': complete},
     }
     write_json(args.out, final)
     total_verses = sum(len(t['verses']) for t in tracks.values())
