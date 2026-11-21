@@ -49,5 +49,12 @@ class AcceptanceTests(unittest.TestCase):
         t=self.track();t['01.mp3']['verses'][0]['text']='wrong'
         self.assertTrue(structural_audit(t,Ref(),'juz'))
     def test_supported_structure(self):self.assertEqual(structural_audit(self.track(),Ref(),'juz'),[])
+    def test_short_surah_does_not_repeat_the_same_full_file_window(self):
+        from verified_align import groups_from_primary
+        units={str(n):{'words':[{'start_ms':100+(n-1)*800,'end_ms':500+(n-1)*800}]} for n in range(1,8)}
+        groups=groups_from_primary({'units':units},7,6000)
+        for g in groups:
+            self.assertNotIn('error',g)
+            self.assertNotEqual((g['begin'],g['end']),(max(0,g['begin']-310),min(6000,g['end']+310)))
 
 if __name__=='__main__':unittest.main()

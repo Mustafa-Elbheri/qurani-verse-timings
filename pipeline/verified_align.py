@@ -104,8 +104,9 @@ def groups_from_primary(primary, total, duration_ms):
             if all(w['end_ms'] > w['start_ms'] for w in words):
                 locations[n] = (words[0]['start_ms'], words[-1]['end_ms'])
     groups = []
-    for first in range(1, total+1, 8):
-        last = min(total, first+7)
+    block = min(8, max(1, total // 2))
+    for first in range(1, total+1, block):
+        last = min(total, first+block-1)
         context = list(range(max(1, first-1), min(total,last+1)+1))
         if any(n not in locations for n in context):
             groups.append(dict(targets=list(range(first,last+1)), context=context,
